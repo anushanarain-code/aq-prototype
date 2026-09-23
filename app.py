@@ -116,14 +116,48 @@ def find_matches(company_input):
 # ---------------------------------------------------------
 
 def display_company_result(row):
-
     st.divider()
-
     st.subheader(row["Company Name"])
 
-    band = row["Category"].strip().upper()
+    band = row["Category"].strip().title()
 
-    st.markdown(f"### AQ Band: **{band}**")
+    band_descriptions = {
+        "Green": "Lower animal-harm exposure according to the current AIM AQ dataset.",
+        "Orange": "Intermediate animal-harm exposure according to the current AIM AQ dataset.",
+        "Red": "Higher animal-harm exposure according to the current AIM AQ dataset.",
+    }
+
+    band_colors = {
+        "Green": "#2E7D32",
+        "Orange": "#EF6C00",
+        "Red": "#C62828",
+    }
+
+    color = band_colors.get(band, "#666666")
+    description = band_descriptions.get(
+        band,
+        "AQ classification according to the current AIM AQ dataset.",
+    )
+
+    st.markdown(
+        f"""
+        <div style="
+            display: inline-block;
+            padding: 8px 18px;
+            border-radius: 20px;
+            background-color: {color};
+            color: white;
+            font-size: 20px;
+            font-weight: 600;
+            margin: 8px 0 12px 0;
+        ">
+            AQ Band: {band}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.caption(description)
 
     st.markdown("#### Company information")
 
