@@ -1,9 +1,11 @@
+import json
 import re
+import urllib.request
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-
+import yfinance as yf
 
 st.set_page_config(
     page_title="AIM Ahimsa Quotient",
@@ -27,18 +29,96 @@ EXPECTED_COLUMNS = [
     "Justification",
 ]
 
+def load_aim_methodology():
+    methodology_path = Path("aim_methodology.txt")
+
+    if not methodology_path.exists():
+        return ""
+
+    return methodology_path.read_text(
+        encoding="utf-8"
+    ).strip()
+
+
+def ask_local_ai(prompt):
+    payload = {
+        "model": "gemma3:4b",
+        "prompt": prompt,
+        "stream": False,
+    }
+
+    request = urllib.request.Request(
+        "http://localhost:11434/api/generate",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            result = json.loads(response.read().decode("utf-8"))
+
+        return result.get("response", "").strip()
+
+    except Exception as exc:
+        return f"AI explanation is currently unavailable: {exc}"
 
 # Future historical-data interface.
 # This remains empty until a real market-data source is added.
-HISTORICAL_DATA_COLUMNS = [
-    "Company Name",
-    "Date",
-    "Price",
-    "Benchmark",
-]
+YAHOO_TICKER_MAP = {
+    "Pranav Constructions Ltd": "PRANAV.NS",
+}
 
+BENCHMARK_TICKER = "^NSEI"
 
-@st.cache_data
+def load_historical_data(company_name):
+    yahoo_ticker = YAHOO_TICKER_MAP.get(company_name)
+
+    if not yahoo_ticker:
+        return pd.DataFrame()
+
+    company_data = yf.download(
+        yahoo_ticker,
+        period="1y",
+        auto_adjust=False,
+        progress=False,
+    )
+
+    benchmark_data = yf.download(
+        BENCHMARK_TICKER,
+        period="1y",
+        auto_adjust=False,
+        progress=False,
+    )
+
+    if company_data.empty or benchmark_data.empty:
+        return pd.DataFrame()
+
+    company_close = company_data["Close"]
+    benchmark_close = benchmark_data["Close"]
+
+    if isinstance(company_close, pd.DataFrame):
+        company_close = company_close.iloc[:, 0]
+
+    if isinstance(benchmark_close, pd.DataFrame):
+        benchmark_close = benchmark_close.iloc[:, 0]
+
+    historical = pd.concat(
+        [
+            company_close.rename("Price"),
+            benchmark_close.rename("Benchmark"),
+        ],
+        axis=1,
+        join="inner",
+    )
+
+    historical = historical.reset_index()
+    historical["Company Name"] = company_name
+
+    return historical[
+        ["Company Name", "Date", "Price", "Benchmark"]
+    ]
+
 def load_data():
     if not DATA_FILE.exists():
         st.error("AQ dataset not found.")
@@ -64,17 +144,6 @@ def load_data():
         df[column] = df[column].fillna("").astype(str).str.strip()
 
     return df
-
-
-def load_historical_data():
-    """
-    Future interface for real historical market data.
-
-    No historical prices are currently available in the prototype,
-    so this function returns an empty dataframe with the expected
-    future columns.
-    """
-    return pd.DataFrame(columns=HISTORICAL_DATA_COLUMNS)
 
 
 df = load_data()
@@ -187,6 +256,141 @@ def display_company_result(row):
         "Source: AIM AQ dataset provided for this prototype."
     )
 
+    st.markdown("#### Ask about this company")
+
+    question_options = [
+        "Why is this company in this AQ band?",
+        "Explain the AIM justification.",
+        "What does this AQ band mean?",
+    ]
+
+    selected_question = st.selectbox(
+        "Choose a question",
+        question_options,
+        key=f"ai_question_{row['Company Name']}",
+    )
+
+    if st.button(
+        "Explain",
+        key=f"ai_explain_{row['Company Name']}",
+    ):
+        methodology = load_aim_methodology()
+
+        prompt = f""" 
+You are an explanation assistant for AIM (Ahimsa Investment Movement).
+
+Your job is ONLY to explain information supplied by AIM's AQ dataset.
+You are NOT an AQ classifier.
+
+STRICT RULES:
+1. The supplied AQ Band is authoritative. Never change it.
+2. Do not infer, guess, or invent facts about the company.
+3. COMPANY FACTS MUST BE GROUNDED STRICTLY IN THE SUPPLIED COMPANY DATA.
+   You may state a fact about this company only if that fact is explicitly
+   present in the Company, AQ Band, AIM Justification, or Company
+   information fields supplied below.
+
+   The AIM methodology explains how the framework works, but it must NOT
+   be used to infer additional facts about this specific company.
+
+   For example, do not infer that a company has no animal-derived
+   products, no food-service activity, no animal testing, or any other
+   business activity unless that information is explicitly stated in
+   the supplied company data.
+4. If the supplied information does not answer the question,
+   say that the available information does not establish the answer.
+5. AQ means Ahimsa Quotient, not Air Quality Index.
+6. Explain the information in plain language.
+7. Keep the answer to 2–4 sentences.
+
+SUPPLIED AIM INFORMATION:
+CURRENT AIM METHODOLOGY:
+{methodology}
+
+Company: {row["Company Name"]}
+AQ Band: {band}
+AIM Justification: {row["Justification"]}
+
+Company information:
+Symbol: {row["Symbol"]}
+Macro Sector: {row["Macro Sector"]}
+Sector: {row["Sector"]}
+Industry: {row["Industry"]}
+Basic Industry: {row["Basic Industry"]}
+
+QUESTION:
+{selected_question}
+"""
+
+        with st.spinner("Generating explanation..."):
+            answer = ask_local_ai(prompt)
+
+        st.markdown("**AI explanation**")
+        st.write(answer)
+
+        st.caption(
+            "AI explanation based only on the AQ information supplied "
+            "above. AQ classification remains determined by the AIM "
+            "AQ dataset."
+        ) 
+
+    st.markdown("#### Historical performance")
+
+    historical = load_historical_data(row["Company Name"])
+
+    if historical.empty:
+        st.info(
+            "Historical market data is not currently available "
+            "for this company in the prototype."
+        )
+    else:
+        company_start = historical["Price"].iloc[0]
+        company_end = historical["Price"].iloc[-1]
+
+        benchmark_start = historical["Benchmark"].iloc[0]
+        benchmark_end = historical["Benchmark"].iloc[-1]
+
+        company_return = (
+            (company_end / company_start) - 1
+        ) * 100
+
+        benchmark_return = (
+            (benchmark_end / benchmark_start) - 1
+        ) * 100
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric(
+                "Company — 1 year",
+                f"{company_return:+.1f}%",
+            )
+
+        with col2:
+            st.metric(
+                "NIFTY 50 — same period",
+                f"{benchmark_return:+.1f}%",
+            )
+
+        chart_data = historical[["Price", "Benchmark"]].copy()
+
+        chart_data = (
+            chart_data
+            / chart_data.iloc[0]
+            * 100
+        )
+
+        chart_data.columns = [
+            row["Company Name"],
+            "NIFTY 50",
+        ]
+
+        st.line_chart(chart_data)
+
+        st.caption(
+            "Historical performance over the available 1-year period. "
+            "Historical performance does not indicate future performance."
+        )
 
 def display_not_assessed():
     st.warning(
@@ -250,6 +454,7 @@ def home_page():
 def company_page():
     if st.button("← Back to home"):
         st.session_state["page"] = "home"
+        st.session_state.pop("selected_company", None)
         st.rerun()
 
     st.title("Check a company")
@@ -257,6 +462,7 @@ def company_page():
     company_input = st.text_input(
         "Company name",
         placeholder="Enter a company name",
+        value=st.session_state.get("company_input", ""),
     )
 
     if st.button(
@@ -271,27 +477,41 @@ def company_page():
         matches = find_matches(company_input)
 
         if len(matches) == 1:
-            display_company_result(matches.iloc[0])
+            st.session_state["selected_company"] = (
+                matches.iloc[0]["Company Name"]
+            )
+            st.session_state["company_input"] = company_input
 
         elif len(matches) > 1:
-            st.info("We found multiple possible matches.")
-
-            options = matches["Company Name"].tolist()
-
-            selected_company = st.selectbox(
-                "Select the company you mean",
-                options,
+            st.session_state["ambiguous_matches"] = (
+                matches["Company Name"].tolist()
             )
-
-            selected_row = matches[
-                matches["Company Name"] == selected_company
-            ].iloc[0]
-
-            display_company_result(selected_row)
+            st.session_state["company_input"] = company_input
 
         else:
-            display_not_assessed()
+            st.session_state.pop("selected_company", None)
+            st.session_state.pop("ambiguous_matches", None)
+            st.session_state["company_input"] = company_input
 
+    if "ambiguous_matches" in st.session_state:
+        options = st.session_state["ambiguous_matches"]
+
+        st.info("We found multiple possible matches.")
+
+        selected_company = st.selectbox(
+            "Select the company you mean",
+            options,
+        )
+
+        st.session_state["selected_company"] = selected_company
+
+    if "selected_company" in st.session_state:
+        selected_company = st.session_state["selected_company"]
+
+        selected_matches = find_matches(selected_company)
+
+        if len(selected_matches) > 0:
+            display_company_result(selected_matches.iloc[0])
 
 def analyse_portfolio_inputs(companies):
     """

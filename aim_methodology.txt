@@ -1,0 +1,204 @@
+AIM AHIMSA QUOTIENT — CURRENT METHODOLOGY SOURCE
+Source: AIM of India — Ethical Scoring-AQ
+URL: https://aimofindia.org/ethical-scoring/
+
+IMPORTANT SOURCE RULE
+This file contains only the current three-band AQ framework.
+Legacy numerical AQ scoring material is intentionally excluded.
+Do not infer or generate a numerical AQ score.
+
+1. PURPOSE
+
+AIM uses the Ahimsa Quotient (AQ) framework to classify publicly listed
+companies according to how much their business kills or harms animals.
+
+The framework is intended to help distinguish companies whose business
+activities cause relatively less or more harm to animals.
+
+2. KEY TERMS
+
+Himsak means harm-causing: an activity, ingredient or product that kills
+or harms living beings.
+
+Ahimsak means non-harming: an activity that avoids or reduces harm to
+living beings.
+
+3. THREE AQ BANDS
+
+GREEN — HIGH AQ
+Minimal or no involvement in animal harm.
+
+ORANGE — MEDIUM AQ
+A genuine but smaller animal-linked involvement, or finance activity
+where money is spread across a wide range of industries.
+
+RED — LOW AQ
+Direct, significant, or core involvement in animal harm.
+
+The colour band is a broad indication. It is not an exact numerical
+measurement.
+
+4. MAIN TEST
+
+AIM rates a company on what its business actually does — its products
+and the money it earns — rather than every possible indirect link.
+
+A real and significant animal product or activity can move a company
+to a worse band.
+
+A very small, easily replaceable, or far-fetched animal link does not
+by itself move a company to a worse band.
+
+A company's own business mix matters; two companies in the same sector
+can therefore receive different AQ bands.
+
+5. CORE VS MINORITY TEST
+
+Core or large share:
+Animal product or activity is the heart of the business or generates
+a large share of revenue → Red.
+
+Real but smaller line:
+Genuine animal-linked product or activity exists but is a minority
+part of an otherwise animal-neutral business → Orange.
+
+Tiny, replaceable or far-fetched:
+The link is very small, easily replaced by a non-animal option, or only
+a distant possibility → Green.
+
+6. EXAMPLES OF THINGS THAT DO NOT BY THEMSELVES MOVE A COMPANY DOWN
+
+Serving many industries is not by itself a basis for a worse AQ band.
+Generic supply, services, software, logistics, transport, utilities,
+rent or advertising sold to many industries do not count merely because
+some customers may harm animals.
+
+Environmental or habitat impact does not by itself determine the AQ
+band. AQ measures harm to animals.
+
+Distant or far-fetched links do not by themselves make a company Red.
+
+7. SPECIAL RULES
+
+Products specifically created for animal-rearing or animal-processing
+industries can affect the AQ classification.
+
+Products designed to kill insects or rodents are classified as Red.
+
+Core pharmaceutical and cosmetic makers are classified as Red under
+AIM's stated animal-testing rule. Contract research organisations and
+biotech firms conducting animal testing or depending on animal-derived
+lab materials are also classified as Red under the framework.
+
+Hospitals that merely use medicines remain Green under the framework.
+
+Synthetic substitutes for animal-derived materials are treated as
+Green under the framework.
+
+Animal-derived material built into a product can result in Red
+classification.
+
+Businesses that directly sell or serve animal food can move to a worse
+band depending on the scale of that activity.
+
+8. FINANCE COMPANIES
+
+Finance companies are judged according to what their money ultimately
+supports.
+
+Finance companies whose money is spread across a wide mix of industries,
+including animal-based businesses, are classified Orange.
+
+Money restricted to one animal-neutral purpose, or pure market
+infrastructure that does not itself direct capital into animal
+businesses, can be classified Green.
+
+9. CLASSIFICATION EVIDENCE
+
+AIM uses publicly available information and company-published
+disclosures.
+
+Sources can include:
+- annual reports
+- investor presentations
+- segment disclosures
+- company websites
+- product catalogues
+- regulatory filings
+- stock-exchange disclosures
+- sustainability, ESG and integrated reports
+- industry reports and market research
+- credible media sources
+- government agencies
+- recognised industry associations
+
+AIM states that it verifies underlying facts before relying on an
+assumption.
+
+Where evidence is limited or conflicting, AIM states that it temporarily
+assigns the safer higher-harm band until better information becomes
+available.
+
+10. CLASSIFICATION PROCESS
+
+AIM's stated process is:
+
+1. Examine the company's actual business, products, raw materials,
+   business segments and revenue mix.
+
+2. Apply the main test: determine whether the company's own animal
+   involvement is a real and significant part of the business or only
+   a small or far-fetched link.
+
+3. Check the share of relevant activity and apply the framework rules.
+
+4. Assign Red, Orange or Green and document a factual explanation.
+
+5. Peer-check classifications against similar companies and revisit
+   classifications when new information becomes available.
+
+11. LIMITATIONS
+
+AIM states that ahimsa is a subjective idea and that no classification
+can be fully objective.
+
+Companies can operate across several business segments, making it
+difficult to separate all animal-linked and animal-neutral revenue.
+
+Ratings rely on publicly available information and judgement and may
+change when additional information becomes available.
+
+The AQ band is a broad indication rather than an exact measurement.
+
+12. AI USE RULES
+
+The AQ dataset supplied by the application is authoritative for the
+specific company's current AQ band.
+
+The AI must never independently classify a company.
+
+The AI must never change, override or infer a company's AQ band.
+
+The AI may explain a supplied AQ classification using:
+- the company's supplied AIM justification;
+- the company's supplied AQ band;
+- the methodology in this source file.
+
+The AI must not invent company activities, products, revenue,
+animal links, ethical practices, sustainability claims, or external
+sources.
+
+If the supplied company information does not establish an answer, the
+AI must say that the available AIM information does not establish the
+answer.
+
+The AI must not introduce numerical AQ scores.
+
+The AI must not use general model knowledge to fill missing company
+information.
+
+SOURCE SCOPE
+
+This source represents the current three-band framework only.
+Legacy numerical AQ scoring material appearing later on the AIM webpage
+is intentionally excluded from this source.
