@@ -14,8 +14,7 @@ st.set_page_config(
 )
 
 
-DATA_FILE = Path(__file__).parent / "data" / "aq_master_list.csv"
-
+DATA_FILE = Path(__file__).parent / "data" / "aim_companies.csv"
 
 EXPECTED_COLUMNS = [
     "Company Name",
@@ -38,7 +37,182 @@ def load_aim_methodology():
     return methodology_path.read_text(
         encoding="utf-8"
     ).strip()
+def build_ai_prompt(question, context=""):
+    methodology = get_relevant_methodology(question)
 
+    return f"""
+You are an assistant for AIM's Ahimsa Quotient (AQ).
+
+Answer the user's question using ONLY the AIM methodology and
+company information supplied below.
+
+STRICT RULES:
+- The supplied AIM AQ dataset is authoritative for a company's AQ band.
+- Never independently classify a company.
+- Never change, override, or infer an AQ band.
+- Never invent company activities, products, revenue, animal links,
+  ethical practices, sustainability claims, or external sources.
+- Never introduce a numerical AQ score.
+- Do not use general model knowledge to fill missing information.
+- For methodology questions, answer only from the supplied AIM methodology.
+  Do not use any company records to create examples or explanations unless
+  the user explicitly asks about a company.
+- If the supplied methodology directly answers the question, do not add
+  examples, company claims, section numbers, or other information that is
+  not present in the supplied methodology.
+- Do not generalize a specific AIM rule into a broader principle.
+- If the methodology gives a specific classification rule, state only that
+  rule and do not extend it to cases not explicitly covered.
+- For a question about a specific methodology rule, if the supplied
+  methodology gives the answer directly, answer with only that rule.
+  Do not add an explanation, rationale, interpretation, or application of
+  other methodology rules unless the supplied methodology explicitly gives
+  that explanation for the specific rule.   
+- If the answer is established by the supplied AIM methodology or
+  company/dataset information, answer it directly.
+- If the supplied information does not establish the answer, say:
+  "The available AIM information does not establish this."
+- Keep the answer clear and concise, in 2–4 sentences.
+- Do not simply repeat the AIM Justification.
+- Explain what the supplied justification means in terms of the AIM
+  methodology.
+- Preserve the meaning and precision of the supplied justification;
+  do not turn a specific statement into a broader factual claim.
+- Do not describe a minority, smaller, allied, incidental, or limited activity as "core" unless the supplied company information explicitly says it is core or a large share of the business.
+- Focus on the animal-harm relevance of the supplied information,
+  rather than treating the company's ordinary business activity as
+  the reason for its AQ band.
+- Do not invent section numbers, citations, source names, URLs, or references.
+- Never mention section numbers such as "Section 4" or "Section 7" in the answer, even if they appear in the supplied company justification.  
+
+RELEVANT AIM METHODOLOGY:
+{methodology}
+
+SUPPLIED COMPANY/DATASET INFORMATION:
+{context}
+
+USER QUESTION:
+{question}
+""".strip()
+
+def get_relevant_methodology(question):
+    question = normalise_text(question)
+
+    sections = {
+        "bands": """
+THREE AQ BANDS
+
+GREEN — HIGH AQ
+Minimal or no involvement in animal harm.
+
+ORANGE — MEDIUM AQ
+A genuine but smaller animal-linked involvement, or finance activity
+where money is spread across a wide range of industries.
+
+RED — LOW AQ
+Direct, significant, or core involvement in animal harm.
+
+The colour band is a broad indication. It is not an exact numerical
+measurement.
+""",
+
+        "core_minority": """
+CORE VS MINORITY TEST
+
+Core or large share:
+Animal product or activity is the heart of the business or generates
+a large share of revenue → Red.
+
+Real but smaller line:
+Genuine animal-linked product or activity exists but is a minority
+part of an otherwise animal-neutral business → Orange.
+
+Tiny, replaceable or far-fetched:
+The link is very small, easily replaced by a non-animal option, or only
+a distant possibility → Green.
+""",
+
+        "process": """
+CLASSIFICATION PROCESS
+
+1. Examine the company's actual business, products, raw materials,
+business segments and revenue mix.
+
+2. Determine whether the company's own animal involvement is a real
+and significant part of the business or only a small or far-fetched link.
+
+3. Check the share of relevant activity and apply the framework rules.
+
+4. Assign Red, Orange or Green and document a factual explanation.
+
+5. Peer-check classifications against similar companies and revisit
+classifications when new information becomes available.
+""",
+
+        "finance": """
+FINANCE COMPANIES
+
+Finance companies are judged according to what their money ultimately
+supports.
+
+Finance companies whose money is spread across a wide mix of industries,
+including animal-based businesses, are classified Orange.
+
+Money restricted to one animal-neutral purpose, or pure market
+infrastructure that does not itself direct capital into animal
+businesses, can be classified Green.
+""",
+
+        "special_rules": """
+SPECIAL RULES
+
+Products specifically created for animal-rearing or animal-processing
+industries can affect the AQ classification.
+
+Products designed to kill insects or rodents are classified as Red.
+
+Core pharmaceutical and cosmetic makers are classified as Red under
+AIM's stated animal-testing rule.
+
+Hospitals that merely use medicines remain Green under the framework.
+
+Synthetic substitutes for animal-derived materials are treated as
+Green under the framework.
+
+Animal-derived material built into a product can result in Red
+classification.
+
+Businesses that directly sell or serve animal food can move to a worse
+band depending on the scale of that activity.
+""",
+
+        "limitations": """
+LIMITATIONS
+
+AIM states that ahimsa is a subjective idea and that no classification
+can be fully objective.
+
+Ratings rely on publicly available information and judgement and may
+change when additional information becomes available.
+
+The AQ band is a broad indication rather than an exact measurement.
+""",
+    }
+
+    if any(word in question for word in ["finance", "bank", "investment", "capital"]):
+        relevant = sections["finance"]
+    elif any(word in question for word in ["red", "orange", "green", "band", "category", "aq"]):
+        relevant = sections["bands"] + "\n" + sections["core_minority"]
+    elif any(word in question for word in ["classify", "classification", "methodology", "how does aim"]):
+        relevant = sections["process"]
+    elif any(word in question for word in ["pharma", "pharmaceutical", "cosmetic", "pesticide", "insect", "rodent", "animal food"]):
+        relevant = sections["special_rules"]
+    elif any(word in question for word in ["limitation", "objective", "subjective"]):
+        relevant = sections["limitations"]
+    else:
+        relevant = sections["bands"] + "\n" + sections["core_minority"]
+
+    return relevant.strip()
 
 def ask_local_ai(prompt):
     payload = {
@@ -175,6 +349,191 @@ def find_matches(company_input):
 
     return df[partial_mask]
 
+def search_dataset(question, max_results=8):
+    """
+    Route natural-language questions to the most relevant AIM dataset
+    records.
+
+    Retrieval only. This function does not classify companies or make
+    investment recommendations.
+    """
+
+    query = normalise_text(question)
+
+    if not query:
+        return pd.DataFrame()
+    
+    methodology_only_terms = [
+        "what does red mean",
+        "what does orange mean",
+        "what does green mean",
+        "what does the green aq category mean",
+        "what does the orange aq category mean",
+        "what does the red aq category mean",
+        "what is red",
+        "what is orange",
+        "what is green",
+        "what does the red aq band mean",
+        "what does the orange aq band mean",
+        "what does the green aq band mean",
+        "what is the red aq band",
+        "what is the orange aq band",
+        "what is the green aq band",
+    ]
+
+    if any(term in query for term in methodology_only_terms):
+        return pd.DataFrame()
+
+    # ---------------------------------------------------------
+    # 1. Methodology questions
+    # ---------------------------------------------------------
+
+    methodology_terms = [
+        "what is aq",
+        "what does aq mean",
+        "what is ahimsa quotient",
+        "what does green mean",
+        "what does orange mean",
+        "what does red mean",
+        "what is green",
+        "what is orange",
+        "what is red",
+        "how does aim classify",
+        "how are companies classified",
+        "classification process",
+        "classification methodology",
+        "aq methodology",
+        "core vs minority",
+        "core or minority",
+        "finance companies",
+        "special rules",
+        "limitations",
+        "himsak",
+        "ahimsak",
+    ]
+
+    if any(term in query for term in methodology_terms):
+        return pd.DataFrame()
+
+    # ---------------------------------------------------------
+    # 2. Category questions
+    # ---------------------------------------------------------
+
+        
+    # ---------------------------------------------------------
+    # 3. Company-specific questions
+    # ---------------------------------------------------------
+
+    company_names = df["Company Name"].apply(normalise_text)
+
+    phrase_matches = []
+
+    for index, company_name in company_names.items():
+        company_words = company_name.split()
+
+        if len(company_words) >= 2:
+            for phrase_length in range(
+                min(4, len(company_words)),
+                1,
+                -1,
+            ):
+                phrase = " ".join(company_words[:phrase_length])
+
+                if len(phrase) >= 5 and phrase in query:
+                    phrase_matches.append(index)
+                    break
+
+    if phrase_matches:
+        return df.loc[phrase_matches].head(max_results)
+
+    # ---------------------------------------------------------
+    # 4. Individual company-name word matching
+    # ---------------------------------------------------------
+
+    stop_words = {
+        "a", "an", "and", "are", "as", "at", "be", "by", "for",
+        "from", "how", "i", "in", "is", "it", "me", "of", "on",
+        "or", "the", "this", "to", "what", "why", "with",
+        "tell", "about", "does", "do", "can", "company",
+    }
+
+    query_words = [
+        word
+        for word in query.split()
+        if word not in stop_words and len(word) >= 3
+    ]
+
+    if not query_words:
+        return pd.DataFrame()
+
+    company_matches = []
+
+    for index, company_name in company_names.items():
+        company_words = set(company_name.split())
+
+        overlap = sum(
+            word in company_words
+            for word in query_words
+        )
+
+        if overlap >= 1:
+            company_matches.append((index, overlap))
+
+    if company_matches:
+        company_matches.sort(
+            key=lambda item: item[1],
+            reverse=True,
+        )
+
+        indexes = [
+            item[0]
+            for item in company_matches[:max_results]
+        ]
+
+        return df.loc[indexes]
+
+    # ---------------------------------------------------------
+    # 5. Broader dataset search
+    # ---------------------------------------------------------
+
+    searchable = (
+        df["Company Name"].fillna("")
+        + " "
+        + df["Symbol"].fillna("")
+        + " "
+        + df["Macro Sector"].fillna("")
+        + " "
+        + df["Sector"].fillna("")
+        + " "
+        + df["Industry"].fillna("")
+        + " "
+        + df["Basic Industry"].fillna("")
+        + " "
+        + df["Category"].fillna("")
+        + " "
+        + df["Justification"].fillna("")
+    ).apply(normalise_text)
+
+    scores = searchable.apply(
+        lambda text: sum(
+            1 for word in query_words
+            if word in text
+        )
+    )
+
+    results = df.loc[scores > 0].copy()
+
+    if results.empty:
+        return pd.DataFrame()
+
+    results["_search_score"] = scores[scores > 0]
+
+    return (
+        results
+        .sort_values("_search_score", ascending=False)
+        .head(max_results)
+        .drop(columns=["_search_score"])
+    )
 
 def display_company_result(row):
     st.divider()
@@ -258,55 +617,23 @@ def display_company_result(row):
 
     st.markdown("#### Ask about this company")
 
-    question_options = [
-        "Why is this company in this AQ band?",
-        "Explain the AIM justification.",
-        "What does this AQ band mean?",
-    ]
-
-    selected_question = st.selectbox(
-        "Choose a question",
-        question_options,
+    question = st.text_input(
+        "Ask a question",
+        placeholder="Ask anything about this company's AQ classification...",
         key=f"ai_question_{row['Company Name']}",
     )
 
+    query = normalise_text(question)
+
     if st.button(
-        "Explain",
+        "Ask",
         key=f"ai_explain_{row['Company Name']}",
     ):
-        methodology = load_aim_methodology()
-
-        prompt = f""" 
-You are an explanation assistant for AIM (Ahimsa Investment Movement).
-
-Your job is ONLY to explain information supplied by AIM's AQ dataset.
-You are NOT an AQ classifier.
-
-STRICT RULES:
-1. The supplied AQ Band is authoritative. Never change it.
-2. Do not infer, guess, or invent facts about the company.
-3. COMPANY FACTS MUST BE GROUNDED STRICTLY IN THE SUPPLIED COMPANY DATA.
-   You may state a fact about this company only if that fact is explicitly
-   present in the Company, AQ Band, AIM Justification, or Company
-   information fields supplied below.
-
-   The AIM methodology explains how the framework works, but it must NOT
-   be used to infer additional facts about this specific company.
-
-   For example, do not infer that a company has no animal-derived
-   products, no food-service activity, no animal testing, or any other
-   business activity unless that information is explicitly stated in
-   the supplied company data.
-4. If the supplied information does not answer the question,
-   say that the available information does not establish the answer.
-5. AQ means Ahimsa Quotient, not Air Quality Index.
-6. Explain the information in plain language.
-7. Keep the answer to 2–4 sentences.
-
-SUPPLIED AIM INFORMATION:
-CURRENT AIM METHODOLOGY:
-{methodology}
-
+        if not question.strip():
+            st.warning("Please enter a question.")
+            return
+        
+        context = f"""
 Company: {row["Company Name"]}
 AQ Band: {band}
 AIM Justification: {row["Justification"]}
@@ -317,10 +644,12 @@ Macro Sector: {row["Macro Sector"]}
 Sector: {row["Sector"]}
 Industry: {row["Industry"]}
 Basic Industry: {row["Basic Industry"]}
-
-QUESTION:
-{selected_question}
 """
+
+        prompt = build_ai_prompt(
+            question,
+            context,
+        )
 
         with st.spinner("Generating explanation..."):
             answer = ask_local_ai(prompt)
@@ -329,9 +658,7 @@ QUESTION:
         st.write(answer)
 
         st.caption(
-            "AI explanation based only on the AQ information supplied "
-            "above. AQ classification remains determined by the AIM "
-            "AQ dataset."
+            "AQ classification remains determined by the AIM AQ dataset."
         ) 
 
     st.markdown("#### Historical performance")
@@ -402,6 +729,73 @@ def display_not_assessed():
         "This does not mean that the company has a particular "
         "AQ classification."
     )
+def chat_page():
+    st.title("Ask AIM")
+
+    st.write(
+        "Ask questions about AIM's Ahimsa Quotient, company "
+        "classifications, and the AIM methodology."
+    )
+
+    question = st.text_input(
+        "Your question",
+        placeholder="Ask anything about ahimsak investment...",
+        key="general_chat_question",
+    )
+
+    if st.button(
+        "Ask",
+        key="general_chat_ask",
+    ):
+        if not question.strip():
+            st.warning("Please enter a question.")
+            return
+
+        query = normalise_text(question)
+
+        category_requested = None
+
+        for possible_category in ["green", "orange", "red"]:
+            if possible_category in query:
+                category_requested = possible_category.title()
+                break
+
+        if (
+            category_requested
+            and "how many" in query
+            and "compan" in query
+        ):
+            count = (
+                df["Category"]
+                .str.lower()
+                .eq(category_requested.lower())
+                .sum()
+            )
+
+            st.markdown("**AI answer**")
+            st.write(
+                f"There are {count} companies classified as "
+                f"{category_requested} in the supplied AIM AQ dataset."
+            )
+            return
+
+        results = search_dataset(question)
+
+        context = ""
+
+        if not results.empty:
+            context = results.to_string(index=False)
+
+        prompt = build_ai_prompt(
+            question,
+            context,
+        )
+
+        with st.spinner("Searching AIM information..."):
+            answer = ask_local_ai(prompt)
+
+        st.markdown("**AI answer**")
+        st.write(answer)
 
 
 def home_page():
@@ -414,7 +808,7 @@ def home_page():
 
     st.write("")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         if st.button(
@@ -439,6 +833,13 @@ def home_page():
         ):
             st.session_state["page"] = "builder"
             st.rerun()
+    with col4:
+        if st.button(
+            "Ask AIM",
+            use_container_width=True,
+        ):
+            st.session_state["page"] = "chat"
+            st.rerun()        
 
     st.write("")
 
@@ -459,10 +860,15 @@ def company_page():
 
     st.title("Check a company")
 
-    company_input = st.text_input(
+    company_options = [""] + sorted(
+        df["Company Name"].dropna().unique().tolist()
+    )
+
+    company_input = st.selectbox(
         "Company name",
-        placeholder="Enter a company name",
-        value=st.session_state.get("company_input", ""),
+        company_options,
+        index=0,
+        placeholder="Start typing a company name",
     )
 
     if st.button(
@@ -1189,3 +1595,5 @@ elif st.session_state["page"] == "portfolio":
 
 elif st.session_state["page"] == "builder":
     portfolio_builder_page()
+elif st.session_state["page"] == "chat":
+    chat_page()    
