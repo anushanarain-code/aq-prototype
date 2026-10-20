@@ -833,14 +833,22 @@ def home_page():
         ):
             st.session_state["page"] = "builder"
             st.rerun()
+   
     with col4:
         if st.button(
             "Ask AIM",
             use_container_width=True,
         ):
             st.session_state["page"] = "chat"
-            st.rerun()        
+            st.rerun()
 
+    if st.button(
+        "Upload a portfolio",
+        use_container_width=True,
+    ):
+        st.session_state["page"] = "upload"
+        st.rerun()
+    
     st.write("")
 
     with st.expander("What is AQ?"):
@@ -957,6 +965,183 @@ def analyse_portfolio_inputs(companies):
 
     return pd.DataFrame(results)
 
+
+
+def portfolio_upload_page():
+    if st.button("← Back to home", key="upload_back_home"):
+        st.session_state["page"] = "home"
+        st.rerun()
+
+    st.title("Upload and assess a portfolio")
+    st.write(
+        "Upload a CSV or Excel portfolio export. "
+        "AQ classifications come only from the current AIM AQ dataset."
+    )
+
+    uploaded_file = st.file_uploader(
+        "Choose a portfolio file",
+        type=["csv", "xlsx", "xls"],
+        key="portfolio_upload_file",
+    )
+
+    if uploaded_file is None:
+        st.info("Upload a CSV or Excel file to begin.")
+        return
+
+    try:
+        if uploaded_file.name.lower().endswith(".csv"):
+            uploaded_df = pd.read_csv(uploaded_file, encoding="utf-8-sig")
+        else:
+            uploaded_df = pd.read_excel(uploaded_file)
+    except Exception as exc:
+        st.error(f"Could not read this file: {exc}")
+        return
+
+    if uploaded_df.empty or len(uploaded_df.columns) == 0:
+        st.warning("The uploaded file contains no usable rows or columns.")
+        return
+
+    st.write(f"Rows found: {len(uploaded_df)}")
+
+    columns = list(uploaded_df.columns)
+    optional_columns = ["(Not available)"] + columns
+
+    st.subheader("Map your file columns")
+    name_col = st.selectbox(
+        "Company name column (required)",
+        columns,
+        key="upload_name_col",
+    )
+    isin_col = st.selectbox(
+        "ISIN column (optional)",
+        optional_columns,
+        key="upload_isin_col",
+    )
+    symbol_col = st.selectbox(
+        "Stock symbol column (optional)",
+        optional_columns,
+        key="upload_symbol_col",
+    )
+    value_col = st.selectbox(
+        "Market value column (optional)",
+        optional_columns,
+        key="upload_value_col",
+    )
+
+    if not st.button(
+        "Match holdings to AIM AQ",
+        type="primary",
+        key="run_portfolio_upload",
+    ):
+        return
+
+    def clean_value(value):
+        if pd.isna(value):
+            return ""
+        return str(value).strip()
+
+    aq_data = df.copy()
+    aq_data["_name_key"] = aq_data["Company Name"].apply(normalise_text)
+    aq_data["_isin_key"] = (
+        aq_data["ISIN Code"].fillna("").astype(str).str.strip().str.upper()
+    )
+    aq_data["_symbol_key"] = (
+        aq_data["Symbol"].fillna("").astype(str).str.strip().str.upper()
+    )
+
+    results = []
+
+    for _, holding in uploaded_df.iterrows():
+        original_name = clean_value(holding[name_col])
+        isin = (
+            clean_value(holding[isin_col]).upper()
+            if isin_col != "(Not available)"
+            else ""
+        )
+        symbol = (
+            clean_value(holding[symbol_col]).upper()
+            if symbol_col != "(Not available)"
+            else ""
+        )
+
+        market_value = None
+        if value_col != "(Not available)":
+            raw_value = clean_value(holding[value_col])
+            if raw_value:
+                market_value = pd.to_numeric(
+                    raw_value.replace(",", "").replace("₹", "").strip(),
+                    errors="coerce",
+                )
+
+        matched_company = ""
+        aq_band = ""
+        status = "Not currently assessed"
+        candidates = pd.DataFrame()
+
+        if not original_name and not isin and not symbol:
+            status = "Missing company identifiers"
+
+        elif isin:
+            candidates = aq_data[aq_data["_isin_key"] == isin]
+            if len(candidates) == 1:
+                status = "Assessed — ISIN match"
+            elif len(candidates) > 1:
+                status = "Ambiguous ISIN — needs review"
+            else:
+                status = "ISIN not found — needs review"
+                candidates = pd.DataFrame()
+
+        elif symbol:
+            candidates = aq_data[aq_data["_symbol_key"] == symbol]
+            if len(candidates) == 1:
+                status = "Assessed — symbol match"
+            elif len(candidates) > 1:
+                status = "Ambiguous symbol — needs review"
+            else:
+                status = "Symbol not found — needs review"
+                candidates = pd.DataFrame()
+
+        elif original_name:
+            name_key = normalise_text(original_name)
+            candidates = aq_data[aq_data["_name_key"] == name_key]
+            if len(candidates) == 1:
+                status = "Assessed — exact name match"
+            elif len(candidates) > 1:
+                status = "Ambiguous name — needs review"
+            else:
+                status = "Not currently assessed"
+
+        if len(candidates) == 1 and status.startswith("Assessed"):
+            matched = candidates.iloc[0]
+            matched_company = matched["Company Name"]
+            aq_band = str(matched["Category"]).strip().title()
+
+        results.append({
+            "Original holding": original_name,
+            "Uploaded ISIN": isin,
+            "Uploaded symbol": symbol,
+            "Matched company": matched_company,
+            "AQ Band": aq_band,
+            "Match status": status,
+            "Market Value": market_value,
+        })
+
+    result_df = pd.DataFrame(results)
+
+    st.subheader("Portfolio matching results")
+    st.dataframe(result_df, use_container_width=True, hide_index=True)
+
+    assessed_count = int(
+        result_df["Match status"].str.startswith("Assessed").sum()
+    )
+    st.metric("Holdings matched to AQ", f"{assessed_count} / {len(result_df)}")
+
+    st.caption(
+        "Only exact identifier or exact company-name matches are assessed. "
+        "Unmatched and ambiguous holdings are not assigned an AQ category. "
+        "Market values are displayed as supplied; exposure calculations "
+        "will be added after this matching workflow is tested."
+    )
 
 def portfolio_page():
     if st.button("← Back to home"):
@@ -1597,3 +1782,6 @@ elif st.session_state["page"] == "builder":
     portfolio_builder_page()
 elif st.session_state["page"] == "chat":
     chat_page()    
+
+elif st.session_state["page"] == "upload":
+    portfolio_upload_page()
