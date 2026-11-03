@@ -1059,13 +1059,23 @@ def portfolio_upload_page():
             key="upload_value_col",
         )
 
-    if not st.button(
+    upload_fingerprint = uploaded_file.getvalue()
+
+    if st.session_state.get("portfolio_upload_fingerprint") != upload_fingerprint:
+        st.session_state["portfolio_upload_fingerprint"] = upload_fingerprint
+        st.session_state["portfolio_assessment_requested"] = False
+        st.session_state.pop("portfolio_result_df", None)
+
+    if st.button(
         "Match holdings to AIM AQ",
         type="primary",
         key="run_portfolio_upload",
     ):
-        return
+        st.session_state["portfolio_assessment_requested"] = True
 
+    if not st.session_state.get("portfolio_assessment_requested", False):
+        return
+    
     def clean_value(value):
         if pd.isna(value):
             return ""
@@ -1119,6 +1129,7 @@ def portfolio_upload_page():
             "Market Value": market_value,
         })
     result_df = pd.DataFrame(results)
+    st.session_state["portfolio_result_df"] = result_df
 
     st.subheader("Portfolio matching results")
     st.dataframe(result_df, use_container_width=True, hide_index=True)
