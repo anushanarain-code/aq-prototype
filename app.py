@@ -6,6 +6,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 import yfinance as yf
+from matching import build_match_index, match_holding
+from broker_formats import detect_broker_format, normalise_portfolio
 
 st.set_page_config(
     page_title="AIM Ahimsa Quotient",
@@ -29,7 +31,7 @@ EXPECTED_COLUMNS = [
 ]
 
 def load_aim_methodology():
-    methodology_path = Path("aim_methodology.txt")
+    methodology_path = Path(__file__).parent / "aim_methodology.txt"
 
     if not methodology_path.exists():
         return ""
@@ -1003,30 +1005,59 @@ def portfolio_upload_page():
 
     st.write(f"Rows found: {len(uploaded_df)}")
 
-    columns = list(uploaded_df.columns)
-    optional_columns = ["(Not available)"] + columns
+    broker_name, broker_mapping = detect_broker_format(uploaded_df)
 
-    st.subheader("Map your file columns")
-    name_col = st.selectbox(
-        "Company name column (required)",
-        columns,
-        key="upload_name_col",
-    )
-    isin_col = st.selectbox(
-        "ISIN column (optional)",
-        optional_columns,
-        key="upload_isin_col",
-    )
-    symbol_col = st.selectbox(
-        "Stock symbol column (optional)",
-        optional_columns,
-        key="upload_symbol_col",
-    )
-    value_col = st.selectbox(
-        "Market value column (optional)",
-        optional_columns,
-        key="upload_value_col",
-    )
+    if broker_name:
+        st.success(f"Automatically recognised portfolio format: {broker_name}")
+
+        uploaded_df = normalise_portfolio(uploaded_df, broker_mapping)
+
+        name_col = (
+            "Company Name"
+            if "Company Name" in broker_mapping
+            else "(Not available)"
+        )
+        isin_col = "ISIN" if "ISIN" in broker_mapping else "(Not available)"
+        symbol_col = "Symbol" if "Symbol" in broker_mapping else "(Not available)"
+        value_col = (
+            "Market Value"
+            if "Market Value" in broker_mapping
+            else "(Not available)"
+        )
+
+        st.caption("Broker columns have been mapped automatically.")
+
+    else:
+        st.info(
+            "We couldn't confidently recognise this broker format. "
+            "Please map the columns manually."
+        )
+
+        columns = list(uploaded_df.columns)
+        optional_columns = ["(Not available)"] + columns
+
+        st.subheader("Map your file columns")
+
+        name_col = st.selectbox(
+            "Company name column (required)",
+            columns,
+            key="upload_name_col",
+        )
+        isin_col = st.selectbox(
+            "ISIN column (optional)",
+            optional_columns,
+            key="upload_isin_col",
+        )
+        symbol_col = st.selectbox(
+            "Stock symbol column (optional)",
+            optional_columns,
+            key="upload_symbol_col",
+        )
+        value_col = st.selectbox(
+            "Market value column (optional)",
+            optional_columns,
+            key="upload_value_col",
+        )
 
     if not st.button(
         "Match holdings to AIM AQ",
@@ -1040,19 +1071,16 @@ def portfolio_upload_page():
             return ""
         return str(value).strip()
 
-    aq_data = df.copy()
-    aq_data["_name_key"] = aq_data["Company Name"].apply(normalise_text)
-    aq_data["_isin_key"] = (
-        aq_data["ISIN Code"].fillna("").astype(str).str.strip().str.upper()
-    )
-    aq_data["_symbol_key"] = (
-        aq_data["Symbol"].fillna("").astype(str).str.strip().str.upper()
-    )
 
+    match_index = build_match_index(df)
     results = []
 
     for _, holding in uploaded_df.iterrows():
-        original_name = clean_value(holding[name_col])
+        original_name = (
+            clean_value(holding[name_col])
+            if name_col != "(Not available)"
+            else ""
+        )
         isin = (
             clean_value(holding[isin_col]).upper()
             if isin_col != "(Not available)"
@@ -1069,63 +1097,27 @@ def portfolio_upload_page():
             raw_value = clean_value(holding[value_col])
             if raw_value:
                 market_value = pd.to_numeric(
-                    raw_value.replace(",", "").replace("₹", "").strip(),
+                    raw_value.replace(",", "").replace("\u20b9", "").strip(),
                     errors="coerce",
                 )
 
-        matched_company = ""
-        aq_band = ""
-        status = "Not currently assessed"
-        candidates = pd.DataFrame()
-
-        if not original_name and not isin and not symbol:
-            status = "Missing company identifiers"
-
-        elif isin:
-            candidates = aq_data[aq_data["_isin_key"] == isin]
-            if len(candidates) == 1:
-                status = "Assessed — ISIN match"
-            elif len(candidates) > 1:
-                status = "Ambiguous ISIN — needs review"
-            else:
-                status = "ISIN not found — needs review"
-                candidates = pd.DataFrame()
-
-        elif symbol:
-            candidates = aq_data[aq_data["_symbol_key"] == symbol]
-            if len(candidates) == 1:
-                status = "Assessed — symbol match"
-            elif len(candidates) > 1:
-                status = "Ambiguous symbol — needs review"
-            else:
-                status = "Symbol not found — needs review"
-                candidates = pd.DataFrame()
-
-        elif original_name:
-            name_key = normalise_text(original_name)
-            candidates = aq_data[aq_data["_name_key"] == name_key]
-            if len(candidates) == 1:
-                status = "Assessed — exact name match"
-            elif len(candidates) > 1:
-                status = "Ambiguous name — needs review"
-            else:
-                status = "Not currently assessed"
-
-        if len(candidates) == 1 and status.startswith("Assessed"):
-            matched = candidates.iloc[0]
-            matched_company = matched["Company Name"]
-            aq_band = str(matched["Category"]).strip().title()
+        match = match_holding(
+            name=original_name,
+            isin=isin,
+            symbol=symbol,
+            match_index=match_index,
+        )
 
         results.append({
             "Original holding": original_name,
             "Uploaded ISIN": isin,
             "Uploaded symbol": symbol,
-            "Matched company": matched_company,
-            "AQ Band": aq_band,
-            "Match status": status,
+            "Matched company": match["matched_company"],
+            "AQ Band": match["band"],
+            "Match status": match["status"],
+            "Match warnings": "; ".join(match["warnings"]),
             "Market Value": market_value,
         })
-
     result_df = pd.DataFrame(results)
 
     st.subheader("Portfolio matching results")
@@ -1134,13 +1126,134 @@ def portfolio_upload_page():
     assessed_count = int(
         result_df["Match status"].str.startswith("Assessed").sum()
     )
-    st.metric("Holdings matched to AQ", f"{assessed_count} / {len(result_df)}")
+    ambiguous_count = int(
+        result_df["Match status"].str.startswith("Ambiguous").sum()
+    )
+    not_assessed_count = len(result_df) - assessed_count - ambiguous_count
+
+    st.subheader("Portfolio assessment summary")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("Assessed", assessed_count)
+
+    with col2:
+        st.metric("Ambiguous — needs review", ambiguous_count)
+
+    with col3:
+        st.metric("Not assessed", not_assessed_count)
+        # Portfolio-level AQ analysis
+    valid_bands = ["Green", "Orange", "Red"]
+
+    valid_assessed = (
+        result_df["Match status"].str.startswith("Assessed", na=False)
+        & result_df["AQ Band"].isin(valid_bands)
+    )
+
+    market_values = pd.to_numeric(
+        result_df["Market Value"], errors="coerce"
+    )
+
+    assessed_value = market_values[valid_assessed].sum(min_count=1)
+    unassessed_value = market_values[~valid_assessed].sum(min_count=1)
+    total_reported_value = market_values.sum(min_count=1)
+
+    def format_rupees(value):
+        if pd.isna(value):
+            return "Not available"
+        return f"₹{value:,.0f}"
+
+    st.subheader("AQ band distribution")
+
+    band_cols = st.columns(3)
+
+    for i, band in enumerate(valid_bands):
+        band_count = int(
+            (valid_assessed & result_df["AQ Band"].eq(band)).sum()
+        )
+        band_mask = valid_assessed & result_df["AQ Band"].eq(band)
+
+        if band_count == 0:
+            band_value = 0
+        else:
+            band_value = market_values[band_mask].sum(min_count=1)
+
+        with band_cols[i]:
+            st.metric(f"{band} holdings", band_count)
+            st.metric(f"{band} market value", format_rupees(band_value))
+
+    st.subheader("Portfolio value assessment")
+
+    value_col1, value_col2, value_col3 = st.columns(3)
+
+    with value_col1:
+        st.metric("Assessed value", format_rupees(assessed_value))
+
+    with value_col2:
+        st.metric("Unassessed value", format_rupees(unassessed_value))
+
+    with value_col3:
+        if pd.notna(total_reported_value) and total_reported_value > 0:
+            coverage = assessed_value / total_reported_value * 100
+            st.metric("Value assessment coverage", f"{coverage:.1f}%")
+        else:
+            st.metric("Value assessment coverage", "Not available")    
+
+    st.subheader("Portfolio market-value distribution")
+
+    if pd.notna(total_reported_value) and total_reported_value > 0:
+        chart_data = pd.DataFrame({
+            "Category": ["Green", "Orange", "Red", "Unassessed"],
+            "Market Value": [
+                market_values[
+                    valid_assessed & result_df["AQ Band"].eq("Green")
+                ].sum(min_count=1) or 0,
+                market_values[
+                    valid_assessed & result_df["AQ Band"].eq("Orange")
+                ].sum(min_count=1) or 0,
+                market_values[
+                    valid_assessed & result_df["AQ Band"].eq("Red")
+                ].sum(min_count=1) or 0,
+                unassessed_value if pd.notna(unassessed_value) else 0,
+            ],
+        })
+
+        chart_data = chart_data[chart_data["Market Value"] > 0]
+        chart_data["Portfolio Share (%)"] = (
+            chart_data["Market Value"] / total_reported_value * 100
+        )
+
+        st.subheader("Portfolio allocation percentages")
+
+        st.dataframe(
+            chart_data,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.bar_chart(
+            chart_data,
+            x="Category",
+            y="Market Value",
+        )
+    else:
+        st.info("A market-value distribution chart is unavailable because no positive total market value was supplied.")
+    csv_data = result_df.to_csv(index=False).encode("utf-8-sig")
+
+    st.download_button(
+        label="Download portfolio report (CSV)",
+        data=csv_data,
+        file_name="aim_aq_portfolio_report.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
 
     st.caption(
         "Only exact identifier or exact company-name matches are assessed. "
-        "Unmatched and ambiguous holdings are not assigned an AQ category. "
-        "Market values are displayed as supplied; exposure calculations "
-        "will be added after this matching workflow is tested."
+        "Ambiguous and unmatched holdings are not assigned an AQ category. "
+        "Market values are used as supplied for portfolio-level analysis. "
+        "Unassessed holdings are reported separately and excluded from "
+        "AQ band distribution."
     )
 
 def portfolio_page():
@@ -1758,11 +1871,13 @@ def portfolio_builder_page():
             "from the eligible universe."
         )
 
-        st.caption(
-            "This output is an illustrative portfolio constructed "
-            "from your selected criteria. It is not a recommendation "
-            "or personalised investment advice."
-        )
+    st.caption(
+        "Only exact identifier or exact company-name matches are assessed. "
+        "Ambiguous and unmatched holdings are not assigned an AQ category. "
+        "Market values are used as supplied for portfolio-level analysis. "
+        "Unassessed holdings are reported separately and are excluded from "
+        "AQ band distribution."
+    )
 
 
 if "page" not in st.session_state:
@@ -1782,6 +1897,5 @@ elif st.session_state["page"] == "builder":
     portfolio_builder_page()
 elif st.session_state["page"] == "chat":
     chat_page()    
-
 elif st.session_state["page"] == "upload":
     portfolio_upload_page()

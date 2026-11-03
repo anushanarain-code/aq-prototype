@@ -5,3 +5,6 @@ __pycache__/
 convert_excel.py
 AIM Ahimsa Classification (1).xlsx
 app_backup_before_ai.py
+.venv/
+app_before_portfolio_upload.py
+test_portfolio.csv
